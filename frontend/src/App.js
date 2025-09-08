@@ -199,6 +199,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [pipelineStatus, setPipelineStatus] = useState(null);
+  const [twitterStatus, setTwitterStatus] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchArticles = async () => {
@@ -223,10 +224,20 @@ function App() {
     }
   };
 
+  const fetchTwitterStatus = async () => {
+    try {
+      const response = await axios.get(`${API}/twitter/status`);
+      setTwitterStatus(response.data);
+    } catch (err) {
+      console.error('Error fetching Twitter status:', err);
+    }
+  };
+
   const handleRefresh = async () => {
     setRefreshing(true);
     await fetchArticles();
     await fetchPipelineStatus();
+    await fetchTwitterStatus();
     setRefreshing(false);
   };
 
@@ -252,9 +263,21 @@ function App() {
     }
   };
 
+  const handleTwitterPost = async (articleId) => {
+    try {
+      await axios.post(`${API}/twitter/post`, { article_id: articleId });
+      // Refresh articles to show updated status
+      await fetchArticles();
+      await fetchPipelineStatus();
+    } catch (err) {
+      console.error('Error posting to Twitter:', err);
+    }
+  };
+
   useEffect(() => {
     fetchArticles();
     fetchPipelineStatus();
+    fetchTwitterStatus();
   }, []);
 
   return (
