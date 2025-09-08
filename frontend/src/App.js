@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './com
 import { Button } from './components/ui/button';
 import { Badge } from './components/ui/badge';
 import { Separator } from './components/ui/separator';
-import { RefreshCw, Clock, ExternalLink, Sparkles, MessageCircle, TrendingUp } from 'lucide-react';
+import { RefreshCw, Clock, ExternalLink, Sparkles, MessageCircle, TrendingUp, Twitter, Send, CheckCircle, AlertCircle } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
