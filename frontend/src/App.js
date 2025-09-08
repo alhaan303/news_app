@@ -136,11 +136,11 @@ const ArticleCard = ({ article, onTwitterPost }) => {
   );
 };
 
-const Stats = ({ articles, isLoading }) => {
+const Stats = ({ articles, pipelineStatus, isLoading }) => {
   if (isLoading) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        {[1, 2, 3].map((i) => (
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+        {[1, 2, 3, 4].map((i) => (
           <div key={i} className="bg-white rounded-xl p-6 shadow-sm border animate-pulse">
             <div className="h-4 bg-gray-200 rounded w-20 mb-2"></div>
             <div className="h-8 bg-gray-200 rounded w-16"></div>
@@ -158,9 +158,10 @@ const Stats = ({ articles, isLoading }) => {
   }).length;
 
   const categories = [...new Set(articles.map(article => article.category))].length;
+  const twitterPosts = articles.filter(article => article.twitter_posted).length;
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
       <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl p-6 shadow-lg">
         <div className="flex items-center justify-between">
           <div>
@@ -188,6 +189,16 @@ const Stats = ({ articles, isLoading }) => {
             <p className="text-3xl font-bold">{categories}</p>
           </div>
           <Sparkles className="w-8 h-8 text-purple-200" />
+        </div>
+      </div>
+      
+      <div className="bg-gradient-to-br from-sky-500 to-sky-600 text-white rounded-xl p-6 shadow-lg">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sky-100 text-sm font-medium">Twitter Posts</p>
+            <p className="text-3xl font-bold">{twitterPosts}</p>
+          </div>
+          <Twitter className="w-8 h-8 text-sky-200" />
         </div>
       </div>
     </div>
