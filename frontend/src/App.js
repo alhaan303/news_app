@@ -308,6 +308,15 @@ function App() {
                 </div>
               )}
               
+              {twitterStatus && (
+                <div className="flex items-center gap-2">
+                  <Twitter className={`w-4 h-4 ${twitterStatus.configured ? (twitterStatus.connected ? 'text-blue-500' : 'text-yellow-500') : 'text-gray-400'}`} />
+                  <span className="text-sm text-gray-600">
+                    Twitter {twitterStatus.configured ? (twitterStatus.connected ? 'Connected' : 'Config Error') : 'Not Setup'}
+                  </span>
+                </div>
+              )}
+              
               <Button 
                 onClick={handleRefresh} 
                 disabled={refreshing}
