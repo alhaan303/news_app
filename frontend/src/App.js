@@ -103,8 +103,32 @@ const ArticleCard = ({ article, onTwitterPost }) => {
             <ExternalLink className="w-3 h-3" />
           </a>
           
-          <div className="text-xs text-gray-500">
-            Processed {formatDate(article.processed_at)}
+          <div className="flex items-center gap-3">
+            {article.twitter_posted ? (
+              <div className="flex items-center gap-2 text-green-600 text-sm">
+                <CheckCircle className="w-4 h-4" />
+                <span>Posted</span>
+              </div>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleTwitterPost}
+                disabled={posting}
+                className="gap-2 text-blue-600 border-blue-200 hover:bg-blue-50"
+              >
+                {posting ? (
+                  <RefreshCw className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Twitter className="w-3 h-3" />
+                )}
+                {posting ? 'Posting...' : 'Tweet'}
+              </Button>
+            )}
+            
+            <div className="text-xs text-gray-500">
+              Processed {formatDate(article.processed_at)}
+            </div>
           </div>
         </div>
       </CardContent>
