@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime, timezone
 import httpx
 import json
+import tweepy
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 
 ROOT_DIR = Path(__file__).parent
@@ -49,23 +50,97 @@ class NewsArticle(BaseModel):
     ai_social_post: Optional[str] = None
     image_url: Optional[str] = None
     processed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    twitter_posted: bool = False
+    twitter_post_id: Optional[str] = None
+    twitter_posted_at: Optional[datetime] = None
 
 class NewsConfig(BaseModel):
     category: str = "technology"
     country: str = "us"
     language: str = "en"
     max_articles: int = 10
+    auto_tweet: bool = False
+
+class TwitterPostRequest(BaseModel):
+    article_id: str
 
 # Global variables for background task control
 background_task_running = False
 news_config = NewsConfig()
 
 # News API Configuration
-NEWS_API_KEY = os.environ.get('NEWS_API_KEY', 'demo_key')  # Users need to provide this
+NEWS_API_KEY = os.environ.get('NEWS_API_KEY', 'demo_key')
 NEWS_API_BASE_URL = "https://newsapi.org/v2"
 
 # AI Configuration  
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
+
+# Twitter API Configuration
+TWITTER_API_KEY = os.environ.get('TWITTER_API_KEY')
+TWITTER_API_SECRET = os.environ.get('TWITTER_API_SECRET')
+TWITTER_ACCESS_TOKEN = os.environ.get('TWITTER_ACCESS_TOKEN')
+TWITTER_ACCESS_TOKEN_SECRET = os.environ.get('TWITTER_ACCESS_TOKEN_SECRET')
+
+def get_twitter_client():
+    """Initialize Twitter API client"""
+    if not all([TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_TOKEN_SECRET]):
+        return None
+    
+    try:
+        # Twitter API v2 client
+        client = tweepy.Client(
+            consumer_key=TWITTER_API_KEY,
+            consumer_secret=TWITTER_API_SECRET,
+            access_token=TWITTER_ACCESS_TOKEN,
+            access_token_secret=TWITTER_ACCESS_TOKEN_SECRET
+        )
+        return client
+    except Exception as e:
+        logger.error(f"Error initializing Twitter client: {e}")
+        return None
+
+async def post_to_twitter(article: NewsArticle) -> bool:
+    """Post article to Twitter"""
+    try:
+        twitter_client = get_twitter_client()
+        if not twitter_client:
+            logger.error("Twitter client not initialized - missing credentials")
+            return False
+            
+        # Create tweet text with article link
+        tweet_text = f"{article.ai_social_post}\n\n{article.url}"
+        
+        # Ensure tweet is under 280 characters
+        if len(tweet_text) > 280:
+            # Truncate social post to fit URL
+            max_post_length = 280 - len(article.url) - 3  # 3 for \n\n
+            truncated_post = article.ai_social_post[:max_post_length-3] + "..."
+            tweet_text = f"{truncated_post}\n\n{article.url}"
+        
+        # Post tweet
+        response = twitter_client.create_tweet(text=tweet_text)
+        
+        if response.data:
+            # Update article with Twitter info
+            await db.articles.update_one(
+                {"id": article.id},
+                {
+                    "$set": {
+                        "twitter_posted": True,
+                        "twitter_post_id": str(response.data['id']),
+                        "twitter_posted_at": datetime.now(timezone.utc)
+                    }
+                }
+            )
+            logger.info(f"Posted to Twitter: {article.title[:50]}... - Tweet ID: {response.data['id']}")
+            return True
+        else:
+            logger.error(f"Failed to post to Twitter: {response}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error posting to Twitter: {e}")
+        return False
 
 async def fetch_news_from_api(config: NewsConfig) -> List[dict]:
     """Fetch news articles from NewsAPI"""
@@ -121,7 +196,7 @@ async def generate_ai_content(title: str, description: str) -> tuple[str, str]:
         # Generate social media post
         social_prompt = f"""
         Create an engaging social media post for this news article. Follow these rules:
-        1. Must be under 240 characters (leaving room for URL)
+        1. Must be under 200 characters (leaving room for URL)
         2. Include 2-3 relevant hashtags
         3. Be engaging and informative
         4. Use a professional but accessible tone
@@ -150,6 +225,7 @@ async def generate_ai_content(title: str, description: str) -> tuple[str, str]:
 async def process_articles(articles_data: List[dict], config: NewsConfig):
     """Process raw articles data and save to database"""
     processed_count = 0
+    posted_count = 0
     
     for article_data in articles_data:
         try:
@@ -187,6 +263,16 @@ async def process_articles(articles_data: List[dict], config: NewsConfig):
             processed_count += 1
             logger.info(f"Processed article: {article.title[:50]}...")
             
+            # Post to Twitter if auto-tweet is enabled
+            if config.auto_tweet:
+                success = await post_to_twitter(article)
+                if success:
+                    posted_count += 1
+                    logger.info(f"Posted to Twitter: {article.title[:50]}...")
+                
+                # Small delay between tweets
+                await asyncio.sleep(2)
+            
             # Small delay to avoid overwhelming the AI API
             await asyncio.sleep(1)
             
@@ -194,8 +280,8 @@ async def process_articles(articles_data: List[dict], config: NewsConfig):
             logger.error(f"Error processing article: {e}")
             continue
     
-    logger.info(f"Processed {processed_count} new articles")
-    return processed_count
+    logger.info(f"Processed {processed_count} new articles, posted {posted_count} to Twitter")
+    return processed_count, posted_count
 
 async def news_pipeline_task():
     """Background task to continuously fetch and process news"""
@@ -211,8 +297,8 @@ async def news_pipeline_task():
             
             if articles_data:
                 # Process articles
-                processed_count = await process_articles(articles_data, news_config)
-                logger.info(f"Pipeline cycle complete. Processed {processed_count} new articles.")
+                processed_count, posted_count = await process_articles(articles_data, news_config)
+                logger.info(f"Pipeline cycle complete. Processed {processed_count} new articles, posted {posted_count} to Twitter.")
             else:
                 logger.warning("No articles fetched from API")
             
@@ -286,9 +372,16 @@ async def stop_pipeline():
 async def pipeline_status():
     """Get pipeline status"""
     article_count = await db.articles.count_documents({})
+    twitter_posted_count = await db.articles.count_documents({"twitter_posted": True})
+    
+    # Check if Twitter is configured
+    twitter_configured = all([TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_TOKEN_SECRET])
+    
     return {
         "running": background_task_running,
         "total_articles": article_count,
+        "twitter_posts": twitter_posted_count,
+        "twitter_configured": twitter_configured,
         "config": news_config.dict()
     }
 
@@ -311,15 +404,92 @@ async def manual_process():
             
         articles_data = await fetch_news_from_api(news_config)
         if not articles_data:
-            return {"message": "No articles fetched", "processed": 0}
+            return {"message": "No articles fetched", "processed": 0, "posted": 0}
             
-        processed_count = await process_articles(articles_data, news_config)
-        return {"message": "Manual processing complete", "processed": processed_count}
+        processed_count, posted_count = await process_articles(articles_data, news_config)
+        return {"message": "Manual processing complete", "processed": processed_count, "posted": posted_count}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error in manual processing: {e}")
         raise HTTPException(status_code=500, detail="Error processing articles")
+
+@api_router.post("/twitter/post")
+async def post_article_to_twitter(request: TwitterPostRequest):
+    """Manually post a specific article to Twitter"""
+    try:
+        # Check if Twitter is configured
+        if not get_twitter_client():
+            raise HTTPException(
+                status_code=400,
+                detail="Twitter API not configured. Please add Twitter credentials to .env file"
+            )
+        
+        # Get article
+        article_data = await db.articles.find_one({"id": request.article_id})
+        if not article_data:
+            raise HTTPException(status_code=404, detail="Article not found")
+        
+        article = NewsArticle(**article_data)
+        
+        # Check if already posted
+        if article.twitter_posted:
+            return {"message": "Article already posted to Twitter", "twitter_post_id": article.twitter_post_id}
+        
+        # Post to Twitter
+        success = await post_to_twitter(article)
+        if success:
+            # Get updated article
+            updated_article_data = await db.articles.find_one({"id": request.article_id})
+            updated_article = NewsArticle(**updated_article_data)
+            return {
+                "message": "Successfully posted to Twitter", 
+                "twitter_post_id": updated_article.twitter_post_id
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to post to Twitter")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error posting to Twitter: {e}")
+        raise HTTPException(status_code=500, detail="Error posting to Twitter")
+
+@api_router.get("/twitter/status")
+async def twitter_status():
+    """Get Twitter configuration status"""
+    twitter_configured = all([TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_TOKEN_SECRET])
+    
+    if not twitter_configured:
+        return {
+            "configured": False,
+            "missing_keys": [
+                key for key, val in {
+                    "TWITTER_API_KEY": TWITTER_API_KEY,
+                    "TWITTER_API_SECRET": TWITTER_API_SECRET,
+                    "TWITTER_ACCESS_TOKEN": TWITTER_ACCESS_TOKEN,
+                    "TWITTER_ACCESS_TOKEN_SECRET": TWITTER_ACCESS_TOKEN_SECRET
+                }.items() if not val
+            ]
+        }
+    
+    # Test Twitter connection
+    try:
+        twitter_client = get_twitter_client()
+        if twitter_client:
+            # Try to get user info
+            me = twitter_client.get_me()
+            return {
+                "configured": True,
+                "connected": True,
+                "username": me.data.username if me.data else "Unknown"
+            }
+    except Exception as e:
+        return {
+            "configured": True,
+            "connected": False,
+            "error": str(e)
+        }
 
 # Include the router in the main app
 app.include_router(api_router)
