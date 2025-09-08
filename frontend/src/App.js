@@ -10,7 +10,9 @@ import { RefreshCw, Clock, ExternalLink, Sparkles, MessageCircle, TrendingUp, Tw
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
-const ArticleCard = ({ article }) => {
+const ArticleCard = ({ article, onTwitterPost }) => {
+  const [posting, setPosting] = useState(false);
+  
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString('en-US', {
       month: 'short',
@@ -19,6 +21,12 @@ const ArticleCard = ({ article }) => {
       hour: '2-digit',
       minute: '2-digit'
     });
+  };
+
+  const handleTwitterPost = async () => {
+    setPosting(true);
+    await onTwitterPost(article.id);
+    setPosting(false);
   };
 
   return (
