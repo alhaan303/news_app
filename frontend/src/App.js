@@ -364,7 +364,7 @@ function App() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <Stats articles={articles} isLoading={loading} />
+        <Stats articles={articles} pipelineStatus={pipelineStatus} isLoading={loading} />
 
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
